@@ -9,13 +9,13 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  TextEditingController controller = TextEditingController()..text = 'A1001王五请到外科第一诊室就诊';
+  TextEditingController controller = TextEditingController()..text = 'A1001，王五，请到外科第一诊室就诊';
   bool speaking = false;
 
   @override
   void initState() {
     super.initState();
-    BaiduTts.init('5dd0055d');
+    BaiduTts.init(appId: '17974304', appKey: 'EjzcwQ8eDoLVX4WMk0OLBQMC', secretKey: '88Ohk7GG8EnF6GX4wOfFpKHaTllXhbBE', sn: '94a8e631-74d582a8-01a2-00e7-2116f');
   }
 
   @override
