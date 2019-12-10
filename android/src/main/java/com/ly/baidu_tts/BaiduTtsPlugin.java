@@ -2,28 +2,22 @@ package com.ly.baidu_tts;
 
 import android.Manifest;
 import android.content.pm.PackageManager;
-import android.os.Handler;
-import android.os.Message;
-import android.util.Log;
 
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
-import com.baidu.tts.chainofresponsibility.logger.LoggerProxy;
+import com.baidu.tts.client.SpeechError;
 import com.baidu.tts.client.SpeechSynthesizer;
 import com.baidu.tts.client.SpeechSynthesizerListener;
 import com.baidu.tts.client.TtsMode;
-import com.ly.baidu_tts.control.InitConfig;
-import com.ly.baidu_tts.listener.UiMessageListener;
-import com.ly.baidu_tts.util.Auth;
-import com.ly.baidu_tts.util.AutoCheck;
+import com.ly.baidu_tts.util.FileUtil;
 import com.ly.baidu_tts.util.IOfflineResourceConst;
 
-import java.io.File;
-import java.util.ArrayList;
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
+import io.flutter.plugin.common.EventChannel;
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
@@ -32,26 +26,40 @@ import io.flutter.plugin.common.PluginRegistry;
 import io.flutter.plugin.common.PluginRegistry.Registrar;
 
 
-public class  BaiduTtsPlugin implements MethodCallHandler, PluginRegistry.RequestPermissionsResultListener  {
+public class BaiduTtsPlugin implements MethodCallHandler, EventChannel.StreamHandler, PluginRegistry.RequestPermissionsResultListener {
     private Registrar registrar;
+    private EventChannel.EventSink events;
     private String appId;
     private String appKey;
     private String secretKey;
     private String sn;
-    private TtsMode ttsMode = IOfflineResourceConst.DEFAULT_OFFLINE_TTS_MODE;
     private SpeechSynthesizer speechSynthesizer;
     private static final String TEMP_DIR = "/sdcard/baiduTTS";
     private static final String TEXT_FILENAME = TEMP_DIR + "/" + IOfflineResourceConst.TEXT_MODEL;
     private static final String MODEL_FILENAME = TEMP_DIR + "/" + IOfflineResourceConst.VOICE_FEMALE_MODEL;
+    private static HashMap<String, Boolean> mapInitied = new HashMap<>();
+
+    private BaiduTtsPlugin(Registrar registrar) {
+        this.registrar = registrar;
+    }
 
     public static void registerWith(Registrar registrar) {
         final MethodChannel channel = new MethodChannel(registrar.messenger(), "baidu_tts");
         BaiduTtsPlugin plugin = new BaiduTtsPlugin(registrar);
         channel.setMethodCallHandler(plugin);
+        registrar.addRequestPermissionsResultListener(plugin);
+        final EventChannel eventChannel = new EventChannel(registrar.messenger(), "baidu_tts_speaking");
+        eventChannel.setStreamHandler(plugin);
     }
 
-    private BaiduTtsPlugin(Registrar registrar) {
-        this.registrar = registrar;
+    @Override
+    public void onListen(Object o, EventChannel.EventSink eventSink) {
+        this.events = eventSink;
+    }
+
+    @Override
+    public void onCancel(Object o) {
+
     }
 
     @Override
@@ -68,6 +76,17 @@ public class  BaiduTtsPlugin implements MethodCallHandler, PluginRegistry.Reques
         } else {
             result.notImplemented();
         }
+    }
+
+    private String copyAssetsFile(String sourceFilename) throws IOException {
+        String destFilename = FileUtil.createTmpDir(registrar.activeContext()) + "/" + sourceFilename;
+        boolean recover = false;
+        Boolean existed = mapInitied.get(sourceFilename); // 启动时完全覆盖一次
+        if (existed == null || !existed) {
+            recover = true;
+        }
+        FileUtil.copyFromAssets(registrar.activeContext().getAssets(), sourceFilename, destFilename, recover);
+        return destFilename;
     }
 
     private void initTTs() {
@@ -104,23 +123,87 @@ public class  BaiduTtsPlugin implements MethodCallHandler, PluginRegistry.Reques
         params.put(SpeechSynthesizer.PARAM_TTS_TEXT_MODEL_FILE, TEXT_FILENAME);
         params.put(SpeechSynthesizer.PARAM_TTS_SPEECH_MODEL_FILE, MODEL_FILENAME);
         // 6. 初始化
-        speechSynthesizer.initTts(ttsMode);
+        speechSynthesizer.initTts(TtsMode.OFFLINE);
+        speechSynthesizer.setSpeechSynthesizerListener(new SpeechSynthesizerListener() {
+            @Override
+            public void onSynthesizeStart(String s) {
+
+            }
+
+            @Override
+            public void onSynthesizeDataArrived(String s, byte[] bytes, int i, int i1) {
+
+            }
+
+            @Override
+            public void onSynthesizeFinish(String s) {
+
+            }
+
+            @Override
+            public void onSpeechStart(String s) {
+                registrar.activity().runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (events != null) {
+                            events.success(true);
+                        }
+                    }
+                });
+            }
+
+            @Override
+            public void onSpeechProgressChanged(String s, int i) {
+
+            }
+
+            @Override
+            public void onSpeechFinish(String s) {
+                registrar.activity().runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (events != null) {
+                            events.success(false);
+                        }
+                    }
+                });
+            }
+
+            @Override
+            public void onError(String s, SpeechError speechError) {
+
+            }
+        });
     }
 
     private void initPermission() {
         String[] permissions = {Manifest.permission.WRITE_EXTERNAL_STORAGE};
         if (PackageManager.PERMISSION_GRANTED == ContextCompat.checkSelfPermission(registrar.activeContext(), Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
-            initTTs();
+            try {
+                copyAssetsFile(IOfflineResourceConst.TEXT_MODEL);
+                copyAssetsFile(IOfflineResourceConst.VOICE_FEMALE_MODEL);
+                initTTs();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         } else {
             ActivityCompat.requestPermissions(registrar.activity(), permissions, 0);
         }
+
     }
 
     @Override
     public boolean onRequestPermissionsResult(int requestCode, String[] strings, int[] ints) {
         if (requestCode == 0 && ints.length > 0) {
+            try {
+                copyAssetsFile(IOfflineResourceConst.TEXT_MODEL);
+                copyAssetsFile(IOfflineResourceConst.VOICE_FEMALE_MODEL);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
             initTTs();
         }
         return true;
     }
+
 }
