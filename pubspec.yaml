@@ -1,7 +1,6 @@
 name: baidu_tts
 description: A new Flutter plugin.
-version: 0.0.6
-author: o10301<172985145@qq.com>
+version: 0.0.7
 homepage: https://github.com/o10301/baidu_tts
 
 environment:
